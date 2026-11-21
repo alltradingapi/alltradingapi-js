@@ -34,7 +34,9 @@ jobs:
     needs: build
     environment: npm
     permissions:
-      id-token: write # OIDC — npm reads the workflow's identity, no token stored
+      id-token: write # OIDC — npm reads the workflow identity, no token stored
+    outputs:
+      published: ${{ steps.guard.outputs.published }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,13 +47,22 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Skip if this version is already published
+        id: guard
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "alltradingapi@$VERSION" version >/dev/null 2>&1; then
+            echo "$VERSION already on the registry — skipping publish"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
       # One-time setup (npmjs.com → package settings → Trusted Publisher):
       #   owner: alltradingapi  repo: alltradingapi-js
       #   workflow: release.yml  environment: npm
       - name: Publish to npm
+        if: steps.guard.outputs.published == 'true'
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # unused with trusted publishing; harmless
 
   github-release:
     name: GitHub release
