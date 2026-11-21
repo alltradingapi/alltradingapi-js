@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # OIDC — no npm token stored anywhere
+
+jobs:
+  build:
+    name: build + verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to npm (trusted publishing / OIDC)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: npm
+    permissions:
+      id-token: write # OIDC — npm reads the workflow's identity, no token stored
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # One-time setup (npmjs.com → package settings → Trusted Publisher):
+      #   owner: alltradingapi  repo: alltradingapi-js
+      #   workflow: release.yml  environment: npm
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # unused with trusted publishing; harmless
+
+  github-release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "Quotex candles, assets, saved candles, candle history, chart images and trade result checks."
+            echo
+            echo "- Zero dependencies, Node built-ins only"
+            echo "- ESM + CJS, TypeScript types included"
+            echo "- Node 18+"
+            echo
+            echo "Install: npm install alltradingapi"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "alltradingapi $GITHUB_REF_NAME" --notes-file notes.md
